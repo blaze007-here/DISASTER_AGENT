@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disaster Response Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-950 p-6 sticky top-0 z-50 shadow-md">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-black tracking-wider text-rose-500 flex items-center gap-2">
+                📡 DISASTER MONITORING GRAPH
+            </h1>
+            <span class="text-sm bg-slate-800 text-slate-400 px-3 py-1 rounded-full border border-slate-700">Live Node Engine</span>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-8">
+        <!-- Configuration Control Panel -->
+        <section class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xl">
+            <h2 class="text-lg font-bold mb-4 text-slate-300">Target Registration & Location Settings</h2>
+            <form id="disasterForm" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase mb-2">Email for Alerts</label>
+                    <input id="email" type="email" value="user@example.com" required
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-rose-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase mb-2">Latitude</label>
+                    <input id="latitude" type="number" step="any" value="28.576448" required
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-rose-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase mb-2">Longitude</label>
+                    <input id="longitude" type="number" step="any" value="77.186780" required
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-rose-500">
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="detectBrowserLocation()"
+                            class="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-medium py-2.5 px-4 rounded-lg transition">
+                        📍 Locate Me
+                    </button>
+                    <button type="submit" id="submitBtn"
+                            class="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 px-4 rounded-lg shadow-lg shadow-rose-900/30 transition">
+                        Run Pipeline
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Loading View -->
+        <div id="loadingState" class="hidden text-center py-12 space-y-4">
+            <div class="animate-spin inline-block w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full"></div>
+            <p class="text-slate-400 font-medium animate-pulse">Invoking LangGraph Orchestration Nodes...</p>
+        </div>
+
+        <!-- Dashboard Analytics Panel -->
+        <div id="dashboardResults" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Column 1: Weather Report -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+                <h3 class="text-emerald-400 font-black text-sm tracking-widest uppercase border-b border-slate-800 pb-2">Node 1: Weather Report</h3>
+                <div>
+                    <p class="text-3xl font-extrabold tracking-tight" id="uiTemp">--°C</p>
+                    <p class="text-slate-400 capitalize id" id="uiDesc">Condition description</p>
+                </div>
+                <div class="grid grid-cols-2 gap-4 text-xs pt-2">
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-slate-500 block mb-1">Wind Speed</span>
+                        <strong class="text-sm" id="uiWind">-- m/s</strong>
+                    </div>
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-slate-500 block mb-1">Humidity</span>
+                        <strong class="text-sm" id="uiHumidity">--%</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Column 2: Risk Assessment -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+                <h3 class="text-amber-400 font-black text-sm tracking-widest uppercase border-b border-slate-800 pb-2">Node 2: Risk Evaluator</h3>
+                <div>
+                    <span class="text-xs uppercase font-bold tracking-wider text-slate-400">Determined Status</span>
+                    <div id="uiRiskBadge" class="mt-1 text-center font-black text-xl tracking-wide uppercase py-2 px-4 rounded-lg bg-slate-900 text-slate-300 border border-slate-800">
+                        PENDING
+                    </div>
+                </div>
+                <p class="text-slate-300 text-sm bg-slate-900 p-4 rounded-lg border border-slate-800 leading-relaxed" id="uiExplanation">
+                    Run the engine pipeline to trigger analysis logs.
+                </p>
+            </div>
+
+            <!-- Column 3: Emergency Plan & Notification -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+                <h3 class="text-rose-400 font-black text-sm tracking-widest uppercase border-b border-slate-800 pb-2">Node 3 & 4: Action & Comms</h3>
+                
+                <div class="space-y-2">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Evacuation Directives</h4>
+                    <div id="uiShelterBox" class="text-sm bg-slate-900 p-3 rounded-lg border border-slate-800 text-slate-400">
+                        No operations queued.
+                    </div>
+                </div>
+
+                <div class="space-y-2 pt-2">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Notification Dispatch Status</h4>
+                    <div id="uiNotifyBox" class="text-xs font-mono bg-slate-900 border border-slate-800 p-3 rounded-lg text-slate-400 overflow-x-auto">
+                        Idle...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- App Frontend Logic Layer -->
+    <script>
+        const API_BASE_URL = window.DISASTER_API_BASE_URL || (
+            window.location.port === "5000"
+                ? window.location.origin
+                : "http://127.0.0.1:5000"
+        );
+
+        function detectBrowserLocation() {
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by your current browser environment.");
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    document.getElementById("latitude").value = position.coords.latitude.toFixed(6);
+                    document.getElementById("longitude").value = position.coords.longitude.toFixed(6);
+                },
+                (error) => {
+                    alert(`Location error permission rejected: ${error.message}`);
+                }
+            );
+        }
+
+        document.getElementById("disasterForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById("submitBtn");
+            const loadingState = document.getElementById("loadingState");
+            const dashboardResults = document.getElementById("dashboardResults");
+
+            // UI State Changes
+            submitBtn.disabled = true;
+            loadingState.classList.remove("hidden");
+            dashboardResults.classList.add("hidden");
+
+            const payload = {
+                email: document.getElementById("email").value,
+                latitude: document.getElementById("latitude").value,
+                longitude: document.getElementById("longitude").value
+            };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/check-disaster`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                const rawBody = await response.text();
+                if (!response.ok) {
+                    throw new Error(rawBody || `HTTP ${response.status}`);
+                }
+
+                let state;
+                try {
+                    state = rawBody ? JSON.parse(rawBody) : {};
+                } catch (parseError) {
+                    throw new Error(`Backend returned invalid JSON: ${parseError.message}`);
+                }
+                
+                if (state.error) {
+                    alert(`Pipeline error triggered: ${state.error}`);
+                    return;
+                }
+
+                // 1. Render Weather
+                const weather = state.weather_report;
+                document.getElementById("uiTemp").innerText = `${weather.current.temperature_c}°C`;
+                document.getElementById("uiDesc").innerText = `${weather.current.condition} - ${weather.current.description}`;
+                document.getElementById("uiWind").innerText = `${weather.current.wind_speed_mps} m/s`;
+                document.getElementById("uiHumidity").innerText = `${weather.current.humidity_percent}%`;
+
+                // 2. Render Risk Level Color Schemes
+                const risk = state.risk_report;
+                const badge = document.getElementById("uiRiskBadge");
+                badge.innerText = risk.risk_level;
+                badge.className = "mt-1 text-center font-black text-xl tracking-wide uppercase py-2 px-4 rounded-lg border ";
+                
+                if (["high", "severe"].includes(risk.risk_level.toLowerCase())) {
+                    badge.classList.add("bg-rose-950", "text-rose-400", "border-rose-800");
+                } else if (risk.risk_level.toLowerCase() === "moderate") {
+                    badge.classList.add("bg-amber-950", "text-amber-400", "border-amber-800");
+                } else {
+                    badge.classList.add("bg-emerald-950", "text-emerald-400", "border-emerald-800");
+                }
+                document.getElementById("uiExplanation").innerText = risk.explanation;
+
+                // 3. Render Shelters & Action Steps
+                const plan = state.emergency_plan;
+                const shelterBox = document.getElementById("uiShelterBox");
+                if (plan.action_required && plan.shelters.length > 0) {
+                    shelterBox.innerHTML = `
+                        <p class="text-rose-400 font-bold mb-1">⚠️ Evacuation Recommended</p>
+                        <p class="text-white font-medium">${plan.shelters[0].name}</p>
+                        <p class="text-xs text-slate-400">${plan.shelters[0].address}</p>
+                    `;
+                } else {
+                    shelterBox.innerHTML = `<p class="text-emerald-400 font-medium">✅ Safe. No immediate shelter required.</p>`;
+                }
+
+                // 4. Render Log output status
+                document.getElementById("uiNotifyBox").innerText = state.notification_status || "No action logs generated.";
+
+                // Reveal metrics dashboard
+                dashboardResults.classList.remove("hidden");
+            } catch (err) {
+                alert(`Network communication error: ${err.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                loadingState.classList.add("hidden");
+            }
+        });
+    </script>
+</body>
+</html>
