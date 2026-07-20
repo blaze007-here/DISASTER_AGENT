@@ -335,7 +335,9 @@ app = Flask(__name__)
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get("Origin")
-    if origin in {"http://127.0.0.1:5500", "http://localhost:5500"}:
+    allowed_origin = os.getenv("FRONTEND_ORIGIN", "").strip()
+    is_vercel_origin = bool(origin) and origin.endswith(".vercel.app")
+    if origin in {"http://127.0.0.1:5500", "http://localhost:5500"} or origin == allowed_origin or is_vercel_origin:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"

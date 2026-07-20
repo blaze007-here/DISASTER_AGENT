@@ -116,11 +116,10 @@
 
     <!-- App Frontend Logic Layer -->
     <script>
-        const API_BASE_URL = window.DISASTER_API_BASE_URL || (
-            window.location.port === "5000"
-                ? window.location.origin
-                : "http://127.0.0.1:5000"
-        );
+        const API_BASE_URL = window.DISASTER_API_BASE_URL || (() => {
+            const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+            return isLocalHost ? "http://127.0.0.1:5000" : window.location.origin;
+        })();
 
         function detectBrowserLocation() {
             if (!navigator.geolocation) {
