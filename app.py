@@ -8,13 +8,34 @@ import requests
 from flask import Flask, jsonify, request, send_from_directory
 from langgraph.graph import END, StateGraph
 
+
+def load_local_env_file() -> None:
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+
+    with open(env_path, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+load_local_env_file()
+
 # ======================================================================
 # CONFIGURATION & ENVIRONMENT VARIABLES
 # ======================================================================
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "").strip()
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "").strip()
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "").strip()
 
 CURRENT_WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
@@ -24,7 +45,7 @@ DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
 HEAVY_RAIN_3H_MM = 15.0
 HIGH_WIND_MPS = 15.0
 HEAT_C = 40.0
-COLD_C = 5.0
+COLD_C = 5.0    
 SHELTER_SEARCH_RADIUS_M = 5000
 SHELTER_KEYWORDS = "emergency shelter OR evacuation center OR community center OR school"
 RISK_LEVELS_REQUIRING_PLAN = {"moderate", "high", "severe"}
@@ -39,6 +60,30 @@ DEFAULT_PRECAUTIONARY_STEPS = [
     "Pack essential medications, identification documents, and water.",
     "Follow instructions issued by local emergency authorities."
 ]
+
+
+def build_fallback_weather_data(latitude: float, longitude: float) -> dict:
+    observed_at = datetime.now(timezone.utc)
+    return {
+        "location": {
+            "name": "Demo Location",
+            "country": "IN",
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+        "current": {
+            "observed_at_utc": observed_at.isoformat(),
+            "condition": "Clear",
+            "description": "demo weather data used because OpenWeather is unavailable",
+            "temperature_c": 28.0,
+            "feels_like_c": 29.0,
+            "humidity_percent": 55,
+            "wind_speed_mps": 3.5,
+            "visibility_m": 10000,
+        },
+        "forecast_24h": [],
+        "source": "demo",
+    }
 
 # ======================================================================
 # STATE & AGENT LOGIC (LANGGRAPH)
@@ -55,17 +100,27 @@ class DisasterAgentState(TypedDict):
     error: Optional[str]
 
 def get_weather_data(latitude: float, longitude: float) -> dict:
+    if not OPENWEATHER_API_KEY:
+        return build_fallback_weather_data(latitude, longitude)
+
     params = {"lat": latitude, "lon": longitude, "units": "metric", "appid": OPENWEATHER_API_KEY}
-    
-    # Current Weather
-    curr_resp = requests.get(CURRENT_WEATHER_URL, params=params, timeout=10)
-    curr_resp.raise_for_status()
-    current = curr_resp.json()
-    
-    # Forecast
-    fore_resp = requests.get(FORECAST_URL, params=params, timeout=10)
-    fore_resp.raise_for_status()
-    forecast = fore_resp.json()
+
+    try:
+        # Current Weather
+        curr_resp = requests.get(CURRENT_WEATHER_URL, params=params, timeout=10)
+        if curr_resp.status_code in {401, 403}:
+            return build_fallback_weather_data(latitude, longitude)
+        curr_resp.raise_for_status()
+        current = curr_resp.json()
+
+        # Forecast
+        fore_resp = requests.get(FORECAST_URL, params=params, timeout=10)
+        if fore_resp.status_code in {401, 403}:
+            return build_fallback_weather_data(latitude, longitude)
+        fore_resp.raise_for_status()
+        forecast = fore_resp.json()
+    except requests.RequestException:
+        return build_fallback_weather_data(latitude, longitude)
 
     forecast_entries = []
     now = datetime.now(timezone.utc)
@@ -312,6 +367,38 @@ def check_disaster():
         }
         final_state = app_graph.invoke(initial_state)
         return jsonify(final_state)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route('/api/weather-preview', methods=['OPTIONS'])
+def weather_preview_options():
+    return ('', 204)
+
+
+@app.route('/api/weather-preview', methods=['POST'])
+def weather_preview():
+    try:
+        data = request.get_json(silent=True) or {}
+        initial_state = {
+            "latitude": float(data.get("latitude", 28.5764)),
+            "longitude": float(data.get("longitude", 77.1868)),
+            "country": data.get("country", "India"),
+            "user_contact": data.get("email", "user@example.com"),
+            "weather_report": None,
+            "risk_report": None,
+            "emergency_plan": None,
+            "notification_status": "Preview mode: notifications are not sent.",
+            "error": None,
+        }
+
+        preview_state = weather_node(initial_state)
+        if not preview_state.get("error"):
+            preview_state = risk_node(preview_state)
+        if not preview_state.get("error"):
+            preview_state = plan_node(preview_state)
+
+        return jsonify(preview_state)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

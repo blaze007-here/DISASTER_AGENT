@@ -131,11 +131,87 @@
                 (position) => {
                     document.getElementById("latitude").value = position.coords.latitude.toFixed(6);
                     document.getElementById("longitude").value = position.coords.longitude.toFixed(6);
+                    loadWeatherPreview();
                 },
                 (error) => {
                     alert(`Location error permission rejected: ${error.message}`);
                 }
             );
+        }
+
+        function renderDashboard(state) {
+            if (state.error) {
+                alert(`Pipeline error triggered: ${state.error}`);
+                return;
+            }
+
+            const weather = state.weather_report;
+            document.getElementById("uiTemp").innerText = `${weather.current.temperature_c}°C`;
+            document.getElementById("uiDesc").innerText = `${weather.current.condition} - ${weather.current.description}`;
+            document.getElementById("uiWind").innerText = `${weather.current.wind_speed_mps} m/s`;
+            document.getElementById("uiHumidity").innerText = `${weather.current.humidity_percent}%`;
+
+            const risk = state.risk_report;
+            const badge = document.getElementById("uiRiskBadge");
+            badge.innerText = risk.risk_level;
+            badge.className = "mt-1 text-center font-black text-xl tracking-wide uppercase py-2 px-4 rounded-lg border ";
+
+            if (["high", "severe"].includes(risk.risk_level.toLowerCase())) {
+                badge.classList.add("bg-rose-950", "text-rose-400", "border-rose-800");
+            } else if (risk.risk_level.toLowerCase() === "moderate") {
+                badge.classList.add("bg-amber-950", "text-amber-400", "border-amber-800");
+            } else {
+                badge.classList.add("bg-emerald-950", "text-emerald-400", "border-emerald-800");
+            }
+            document.getElementById("uiExplanation").innerText = risk.explanation;
+
+            const plan = state.emergency_plan;
+            const shelterBox = document.getElementById("uiShelterBox");
+            if (plan.action_required && plan.shelters.length > 0) {
+                shelterBox.innerHTML = `
+                    <p class="text-rose-400 font-bold mb-1">⚠️ Evacuation Recommended</p>
+                    <p class="text-white font-medium">${plan.shelters[0].name}</p>
+                    <p class="text-xs text-slate-400">${plan.shelters[0].address}</p>
+                `;
+            } else {
+                shelterBox.innerHTML = `<p class="text-emerald-400 font-medium">✅ Safe. No immediate shelter required.</p>`;
+            }
+
+            document.getElementById("uiNotifyBox").innerText = state.notification_status || "No action logs generated.";
+            document.getElementById("dashboardResults").classList.remove("hidden");
+        }
+
+        async function loadWeatherPreview() {
+            const loadingState = document.getElementById("loadingState");
+            const dashboardResults = document.getElementById("dashboardResults");
+
+            loadingState.classList.remove("hidden");
+            dashboardResults.classList.add("hidden");
+
+            const payload = {
+                latitude: document.getElementById("latitude").value,
+                longitude: document.getElementById("longitude").value
+            };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/weather-preview`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                const rawBody = await response.text();
+                if (!response.ok) {
+                    throw new Error(rawBody || `HTTP ${response.status}`);
+                }
+
+                const state = rawBody ? JSON.parse(rawBody) : {};
+                renderDashboard(state);
+            } catch (err) {
+                console.warn(`Weather preview could not load: ${err.message}`);
+            } finally {
+                loadingState.classList.add("hidden");
+            }
         }
 
         document.getElementById("disasterForm").addEventListener("submit", async (e) => {
@@ -179,47 +255,7 @@
                     alert(`Pipeline error triggered: ${state.error}`);
                     return;
                 }
-
-                // 1. Render Weather
-                const weather = state.weather_report;
-                document.getElementById("uiTemp").innerText = `${weather.current.temperature_c}°C`;
-                document.getElementById("uiDesc").innerText = `${weather.current.condition} - ${weather.current.description}`;
-                document.getElementById("uiWind").innerText = `${weather.current.wind_speed_mps} m/s`;
-                document.getElementById("uiHumidity").innerText = `${weather.current.humidity_percent}%`;
-
-                // 2. Render Risk Level Color Schemes
-                const risk = state.risk_report;
-                const badge = document.getElementById("uiRiskBadge");
-                badge.innerText = risk.risk_level;
-                badge.className = "mt-1 text-center font-black text-xl tracking-wide uppercase py-2 px-4 rounded-lg border ";
-                
-                if (["high", "severe"].includes(risk.risk_level.toLowerCase())) {
-                    badge.classList.add("bg-rose-950", "text-rose-400", "border-rose-800");
-                } else if (risk.risk_level.toLowerCase() === "moderate") {
-                    badge.classList.add("bg-amber-950", "text-amber-400", "border-amber-800");
-                } else {
-                    badge.classList.add("bg-emerald-950", "text-emerald-400", "border-emerald-800");
-                }
-                document.getElementById("uiExplanation").innerText = risk.explanation;
-
-                // 3. Render Shelters & Action Steps
-                const plan = state.emergency_plan;
-                const shelterBox = document.getElementById("uiShelterBox");
-                if (plan.action_required && plan.shelters.length > 0) {
-                    shelterBox.innerHTML = `
-                        <p class="text-rose-400 font-bold mb-1">⚠️ Evacuation Recommended</p>
-                        <p class="text-white font-medium">${plan.shelters[0].name}</p>
-                        <p class="text-xs text-slate-400">${plan.shelters[0].address}</p>
-                    `;
-                } else {
-                    shelterBox.innerHTML = `<p class="text-emerald-400 font-medium">✅ Safe. No immediate shelter required.</p>`;
-                }
-
-                // 4. Render Log output status
-                document.getElementById("uiNotifyBox").innerText = state.notification_status || "No action logs generated.";
-
-                // Reveal metrics dashboard
-                dashboardResults.classList.remove("hidden");
+                renderDashboard(state);
             } catch (err) {
                 alert(`Network communication error: ${err.message}`);
             } finally {
@@ -227,6 +263,8 @@
                 loadingState.classList.add("hidden");
             }
         });
+
+        window.addEventListener("load", detectBrowserLocation);
     </script>
 </body>
 </html>
