@@ -29,9 +29,6 @@ def load_local_env_file() -> None:
 
 load_local_env_file()
 
-# ======================================================================
-# CONFIGURATION & ENVIRONMENT VARIABLES
-# ======================================================================
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "").strip()
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "").strip()
@@ -87,9 +84,6 @@ def build_fallback_weather_data(latitude: float, longitude: float) -> dict:
         "source": "demo",
     }
 
-# ======================================================================
-# STATE & AGENT LOGIC (LANGGRAPH)
-# ======================================================================
 class DisasterAgentState(TypedDict):
     latitude: float
     longitude: float
