@@ -35,7 +35,9 @@ load_local_env_file()
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "").strip()
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "").strip()
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "").strip()
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "").strip().replace(" ", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
 CURRENT_WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
@@ -261,35 +263,112 @@ def build_emergency_plan(latitude: float, longitude: float, risk_report: dict) -
         return {"action_required": True, "reason": f"Action needed but shelter lookup failed: {e}", "shelters": [], "precautionary_steps": steps}
 
 def build_alert_message(state: DisasterAgentState) -> str:
-    plan = state["emergency_plan"]
-    if not plan.get("action_required"):
-        return "Weather Update\n\nCurrent conditions are safe.\nNo evacuation is required."
-    lines = ["EMERGENCY WEATHER ALERT", "", plan.get("reason"), ""]
-    if plan.get("shelters"):
-        lines += ["Nearest Shelter Found:", plan["shelters"][0]["name"], plan["shelters"][0]["address"], ""]
-    if plan.get("precautionary_steps"):
-        lines.append("Precautionary Steps:")
-        lines += [f"- {step}" for step in plan["precautionary_steps"]]
-    return "\n".join(lines)
+    """Build a useful email from the weather, risk, and emergency-plan results."""
+    weather = state.get("weather_report") or {}
+    current = weather.get("current", {})
+    location = weather.get("location", {})
+    risk = state.get("risk_report") or {}
+    plan = state.get("emergency_plan") or {}
+
+    is_emergency = bool(plan.get("action_required"))
+    lines = [
+        "EMERGENCY WEATHER ALERT" if is_emergency else "WEATHER UPDATE",
+        "",
+        f"Location: {location.get('name') or 'Your selected location'}",
+        f"Temperature: {current.get('temperature_c', 'N/A')} °C",
+        f"Condition: {current.get('description') or current.get('condition') or 'N/A'}",
+        f"Wind speed: {current.get('wind_speed_mps', 'N/A')} m/s",
+        f"Humidity: {current.get('humidity_percent', 'N/A')}%",
+        f"Risk level: {risk.get('risk_level', 'unknown').upper()}",
+        f"Detected hazards: {risk.get('risk_type', 'none')}",
+        "",
+    ]
+
+    alerts = weather.get("alerts") or []
+    if alerts:
+        lines.append("Weather alerts:")
+        lines.extend(f"- {alert.get('details', alert.get('type', 'Weather alert'))}" for alert in alerts)
+        lines.append("")
+
+    if is_emergency:
+        lines.append(plan.get("reason", "Immediate precautions are recommended."))
+        shelters = plan.get("shelters") or []
+        if shelters:
+            shelter = shelters[0]
+            lines.extend([
+                "",
+                "Nearest shelter found:",
+                shelter.get("name") or "Shelter",
+                shelter.get("address") or "Address unavailable",
+            ])
+        steps = plan.get("precautionary_steps") or []
+        if steps:
+            lines.extend(["", "Precautionary steps:"])
+            lines.extend(f"- {step}" for step in steps)
+    else:
+        lines.append("No evacuation action is currently indicated by this assessment.")
+        lines.append("Continue monitoring official local weather and emergency updates.")
+
+    if weather.get("source") == "demo":
+        lines.extend([
+            "",
+            "IMPORTANT: This report uses demo/fallback weather data, not live weather data.",
+            "Do not use it to make real-world emergency decisions.",
+        ])
+
+    return "\\n".join(lines)
+
 
 def send_notifications(state: DisasterAgentState) -> str:
-    message = build_alert_message(state)
-    receiver = state["user_contact"]
-    if EMAIL_ADDRESS == "EMAILLL" or receiver == "user@example.com":
-        return "Notification mocked (Email configuration missing or using dummy test values)."
+    """Send the report by email, returning an honest status on every failure."""
+    receiver = (state.get("user_contact") or "").strip()
+
+    if not receiver or "@" not in receiver:
+        return "Notification not sent: provide a valid recipient email address."
+
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        return (
+            "Notification not sent: email is not configured. "
+            "Set EMAIL_ADDRESS and EMAIL_PASSWORD in the backend .env file."
+        )
+
+    if EMAIL_ADDRESS.lower() in {"emailll", "your_email@gmail.com"}:
+        return "Notification not sent: EMAIL_ADDRESS is still a placeholder."
+    if EMAIL_PASSWORD.lower() in {"your_app_password", "your_email_password", "password"}:
+        return "Notification not sent: EMAIL_PASSWORD is still a placeholder."
+
     try:
         email = EmailMessage()
         email["From"] = EMAIL_ADDRESS
         email["To"] = receiver
-        email["Subject"] = "Emergency Weather Alert System"
-        email.set_content(message)
-        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        plan = state.get("emergency_plan") or {}
+        email["Subject"] = (
+            "EMERGENCY: Weather Alert"
+            if plan.get("action_required")
+            else "Weather Safety Update"
+        )
+        email.set_content(build_alert_message(state))
+
+        # Gmail requires an App Password when 2-Step Verification is enabled.
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+            smtp.ehlo()
             smtp.starttls()
+            smtp.ehlo()
             smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             smtp.send_message(email)
-        return f"Notification successfully emailed to {receiver}"
-    except Exception as e:
-        return f"Notification failed: {str(e)}"
+
+        return f"Notification successfully emailed to {receiver}."
+    except smtplib.SMTPAuthenticationError:
+        return (
+            "Notification failed: email authentication was rejected. "
+            "For Gmail, use a Google App Password, not your normal account password."
+        )
+    except smtplib.SMTPRecipientsRefused:
+        return f"Notification failed: the recipient address {receiver} was rejected."
+    except (smtplib.SMTPException, OSError) as exc:
+        return f"Notification failed: SMTP error: {exc}"
+    except Exception as exc:
+        return f"Notification failed: {exc}"
 
 # ======================================================================
 # NODES & GRAPH PIPELINE
@@ -356,11 +435,16 @@ def check_disaster_options():
 def check_disaster():
     try:
         data = request.get_json(silent=True) or {}
+        latitude = float(data.get("latitude", 28.5764))
+        longitude = float(data.get("longitude", 77.1868))
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return jsonify({"error": "Latitude must be between -90 and 90 and longitude between -180 and 180."}), 400
+
         initial_state = {
-            "latitude": float(data.get("latitude", 28.5764)),
-            "longitude": float(data.get("longitude", 77.1868)),
+            "latitude": latitude,
+            "longitude": longitude,
             "country": data.get("country", "India"),
-            "user_contact": data.get("email", "user@example.com"),
+            "user_contact": data.get("email", ""),
             "weather_report": None,
             "risk_report": None,
             "emergency_plan": None,
@@ -382,11 +466,16 @@ def weather_preview_options():
 def weather_preview():
     try:
         data = request.get_json(silent=True) or {}
+        latitude = float(data.get("latitude", 28.5764))
+        longitude = float(data.get("longitude", 77.1868))
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return jsonify({"error": "Latitude must be between -90 and 90 and longitude between -180 and 180."}), 400
+
         initial_state = {
-            "latitude": float(data.get("latitude", 28.5764)),
-            "longitude": float(data.get("longitude", 77.1868)),
+            "latitude": latitude,
+            "longitude": longitude,
             "country": data.get("country", "India"),
-            "user_contact": data.get("email", "user@example.com"),
+            "user_contact": data.get("email", ""),
             "weather_report": None,
             "risk_report": None,
             "emergency_plan": None,
